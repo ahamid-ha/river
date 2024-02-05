@@ -96,6 +96,9 @@ const command_impls = std.ComptimeStringMap(
         .{ "unmap-switch",              @import("command/map.zig").unmapSwitch },
         .{ "xcursor-theme",             @import("command/xcursor_theme.zig").xcursorTheme },
         .{ "zoom",                      @import("command/zoom.zig").zoom },
+        .{ "focus-view-by",             @import("command/view.zig").focusViewById },
+        .{ "fetch-view-by",             @import("command/view.zig").fetchViewById},
+        .{ "list-views",                @import("command/view.zig").listViews },
     },
 );
 // zig fmt: on

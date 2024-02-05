@@ -171,11 +171,16 @@ post_fullscreen_box: wlr.Box = undefined,
 
 foreign_toplevel_handle: ForeignToplevelHandle = .{},
 
+id: [:0]const u8,
+
 pub fn create(impl: Impl) error{OutOfMemory}!*Self {
     assert(impl != .none);
 
     const view = try util.gpa.create(Self);
     errdefer util.gpa.destroy(view);
+
+    const id = try server.getUniqueId();
+    errdefer util.gpa.free(view.id);
 
     const tree = try server.root.hidden.tree.createSceneTree();
     errdefer tree.node.destroy();
@@ -187,6 +192,7 @@ pub fn create(impl: Impl) error{OutOfMemory}!*Self {
         .impl = impl,
         .link = undefined,
         .tree = tree,
+        .id = id,
         .surface_tree = try tree.createSceneTree(),
         .saved_surface_tree = try tree.createSceneTree(),
         .borders = .{
