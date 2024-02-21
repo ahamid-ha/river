@@ -26,16 +26,58 @@ const globber = @import("globber");
 const server = &@import("main.zig").server;
 const util = @import("util.zig");
 
-const KeycodeSet = @import("KeycodeSet.zig");
 const Seat = @import("Seat.zig");
 const InputDevice = @import("InputDevice.zig");
 
 const log = std.log.scoped(.keyboard);
 
+const KeyConsumer = enum {
+    mapping,
+    im_grab,
+    /// Seat's focused client (xdg or layer shell)
+    focus,
+};
+
+pub const Pressed = struct {
+    const Key = struct {
+        code: u32,
+        consumer: KeyConsumer,
+    };
+
+    pub const capacity = 32;
+
+    comptime {
+        // wlroots uses a buffer of length 32 to track pressed keys and does not track pressed
+        // keys beyond that limit. It seems likely that this can cause some inconsistency within
+        // wlroots in the case that someone has 32 fingers and the hardware supports N-key rollover.
+        //
+        // Furthermore, wlroots will continue to forward key press/release events to river if more
+        // than 32 keys are pressed. Therefore river chooses to ignore keypresses that would take
+        // the keyboard beyond 32 simultaneously pressed keys.
+        assert(capacity == @typeInfo(std.meta.fieldInfo(wlr.Keyboard, .keycodes).type).Array.len);
+    }
+
+    keys: std.BoundedArray(Key, capacity) = .{},
+
+    fn addAssumeCapacity(pressed: *Pressed, new: Key) void {
+        for (pressed.keys.constSlice()) |item| assert(new.code != item.code);
+
+        pressed.keys.appendAssumeCapacity(new);
+    }
+
+    fn remove(pressed: *Pressed, code: u32) ?KeyConsumer {
+        for (pressed.keys.constSlice(), 0..) |item, idx| {
+            if (item.code == code) return pressed.keys.swapRemove(idx).consumer;
+        }
+
+        return null;
+    }
+};
+
 device: InputDevice,
 
-/// Pressed keys for which a mapping was triggered on press
-eaten_keycodes: KeycodeSet = .{},
+/// Pressed keys along with where their press event has been sent
+pressed: Pressed = .{},
 
 key: wl.Listener(*wlr.Keyboard.event.Key) = wl.Listener(*wlr.Keyboard.event.Key).init(handleKey),
 modifiers: wl.Listener(*wlr.Keyboard) = wl.Listener(*wlr.Keyboard).init(handleModifiers),
@@ -135,40 +177,48 @@ fn handleKey(listener: *wl.Listener(*wlr.Keyboard.event.Key), event: *wlr.Keyboa
         if (!released and handleBuiltinMapping(sym)) return;
     }
 
-    // Every sent press event, to a regular client or the IM, should have
+    // Every sent press event, to a regular client or the input method, should have
     // the corresponding release event sent to the same client.
     // Similarly, no press event means no release event.
 
-    const eat_reason = blk: {
-        // We can only eat a key on press; never on release
-        if (released) break :blk self.eaten_keycodes.remove(event.keycode);
-
-        if (self.device.seat.hasMapping(keycode, modifiers, released, xkb_state)) {
-            // The key needs to be eaten before the mapping is run
-            // Otherwise the mapping may e.g. trigger a focus change which sends an incorrect
-            // wl_keyboard.enter event since eaten_keycodes has not yet been updated.
-            break :blk self.eaten_keycodes.add(event.keycode, .mapping);
-        } else if (self.getInputMethodGrab() != null) {
-            break :blk self.eaten_keycodes.add(event.keycode, .im_grab);
+    const consumer: KeyConsumer = blk: {
+        // Decision is made on press; release only follows it
+        if (released) {
+            // The released key might not be in the pressed set when switching from a different tty
+            // or if the press was ignored due to >32 keys being pressed simultaneously.
+            break :blk self.pressed.remove(event.keycode) orelse return;
         }
 
-        break :blk .none;
+        // Ignore key presses beyond 32 simultaneously pressed keys (see comments in Pressed).
+        // We must ensure capacity before calling handleMapping() to ensure that we either run
+        // both the press and release mapping for certain key or neither mapping.
+        self.pressed.keys.ensureUnusedCapacity(1) catch return;
+
+        if (self.device.seat.handleMapping(keycode, modifiers, released, xkb_state)) {
+            break :blk .mapping;
+        } else if (self.getInputMethodGrab() != null) {
+            break :blk .im_grab;
+        }
+
+        break :blk .focus;
     };
 
-    switch (eat_reason) {
-        .none => {
-            const wlr_seat = self.device.seat.wlr_seat;
-            wlr_seat.setKeyboard(self.device.wlr_device.toKeyboard());
-            wlr_seat.keyboardNotifyKey(event.time_msec, event.keycode, event.state);
-        },
-        .mapping => if (!released) {
-            // We handle release mappings separately, regardless of whether press mapping exists
-            const handled = self.device.seat.handleMapping(keycode, modifiers, released, xkb_state);
-            assert(handled);
-        },
+    if (!released) {
+        self.pressed.addAssumeCapacity(.{ .code = event.keycode, .consumer = consumer });
+    }
+
+    switch (consumer) {
+        // Press mappings are handled above when determining the consumer of the press
+        // Release mappings are handled separately as they are executed independent of the consumer.
+        .mapping => {},
         .im_grab => if (self.getInputMethodGrab()) |keyboard_grab| {
             keyboard_grab.setKeyboard(keyboard_grab.keyboard);
             keyboard_grab.sendKey(event.time_msec, event.keycode, event.state);
+        },
+        .focus => {
+            const wlr_seat = self.device.seat.wlr_seat;
+            wlr_seat.setKeyboard(self.device.wlr_device.toKeyboard());
+            wlr_seat.keyboardNotifyKey(event.time_msec, event.keycode, event.state);
         },
     }
 

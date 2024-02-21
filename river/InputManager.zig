@@ -49,7 +49,10 @@ pointer_constraints: *wlr.PointerConstraintsV1,
 input_method_manager: *wlr.InputMethodManagerV2,
 text_input_manager: *wlr.TextInputManagerV3,
 
+/// List of input device configurations. Ordered by glob generality, with
+/// the most general towards the start and the most specific towards the end.
 configs: std.ArrayList(InputConfig),
+
 devices: wl.list.Head(InputDevice, .link),
 seats: std.TailQueue(Seat) = .{},
 
@@ -88,7 +91,11 @@ pub fn init(self: *Self) !void {
     self.seats.prepend(seat_node);
     try seat_node.data.init(default_seat_name);
 
-    if (build_options.xwayland) server.xwayland.setSeat(self.defaultSeat().wlr_seat);
+    if (build_options.xwayland) {
+        if (server.xwayland) |xwayland| {
+            xwayland.setSeat(self.defaultSeat().wlr_seat);
+        }
+    }
 
     server.backend.events.new_input.add(&self.new_input);
     self.virtual_pointer_manager.events.new_virtual_pointer.add(&self.new_virtual_pointer);

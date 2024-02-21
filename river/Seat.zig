@@ -1,6 +1,6 @@
 // This file is part of river, a dynamic tiling wayland compositor.
 //
-// Copyright 2020 The River Developers
+// Copyright 2020 - 2024 The River Developers
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -34,7 +34,6 @@ const InputManager = @import("InputManager.zig");
 const InputRelay = @import("InputRelay.zig");
 const Keyboard = @import("Keyboard.zig");
 const KeyboardGroup = @import("KeyboardGroup.zig");
-const KeycodeSet = @import("KeycodeSet.zig");
 const LayerSurface = @import("LayerSurface.zig");
 const LockSurface = @import("LockSurface.zig");
 const Mapping = @import("Mapping.zig");
@@ -305,23 +304,20 @@ pub fn keyboardEnterOrLeave(self: *Self, target_surface: ?*wlr.Surface) void {
 
 fn keyboardNotifyEnter(self: *Self, wlr_surface: *wlr.Surface) void {
     if (self.wlr_seat.getKeyboard()) |wlr_keyboard| {
-        var keycodes = KeycodeSet{
-            .items = wlr_keyboard.keycodes,
-            .reason = .{.none} ** 32,
-            .len = wlr_keyboard.num_keycodes,
-        };
-
         const keyboard: *Keyboard = @ptrFromInt(wlr_keyboard.data);
-        keycodes.subtract(keyboard.eaten_keycodes);
+
+        var keycodes: std.BoundedArray(u32, Keyboard.Pressed.capacity) = .{};
+        for (keyboard.pressed.keys.constSlice()) |item| {
+            if (item.consumer == .focus) keycodes.appendAssumeCapacity(item.code);
+        }
 
         self.wlr_seat.keyboardNotifyEnter(
             wlr_surface,
-            &keycodes.items,
-            keycodes.len,
+            keycodes.constSlice(),
             &wlr_keyboard.modifiers,
         );
     } else {
-        self.wlr_seat.keyboardNotifyEnter(wlr_surface, null, 0, null);
+        self.wlr_seat.keyboardNotifyEnter(wlr_surface, &.{}, null);
     }
 }
 
@@ -357,25 +353,6 @@ pub fn enterMode(self: *Self, mode_id: u32) void {
     while (it) |node| : (it = node.next) {
         node.data.sendMode(server.config.modes.items[mode_id].name);
     }
-}
-
-/// Is there a user-defined mapping for passed keycode, modifiers and keyboard state?
-pub fn hasMapping(
-    self: *Self,
-    keycode: xkb.Keycode,
-    modifiers: wlr.Keyboard.ModifierMask,
-    released: bool,
-    xkb_state: *xkb.State,
-) bool {
-    const modes = &server.config.modes;
-    for (modes.items[self.mode_id].mappings.items) |*mapping| {
-        if (mapping.match(keycode, modifiers, released, xkb_state, .no_translate) or
-            mapping.match(keycode, modifiers, released, xkb_state, .translate))
-        {
-            return true;
-        }
-    }
-    return false;
 }
 
 /// Handle any user-defined mapping for passed keycode, modifiers and keyboard state
