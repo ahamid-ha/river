@@ -20,6 +20,7 @@ const assert = std.debug.assert;
 const globber = @import("globber");
 const server = &@import("../main.zig").server;
 const util = @import("../util.zig");
+const wlr = @import("wlroots");
 
 const View = @import("../View.zig");
 const Error = @import("../command.zig").Error;
@@ -149,6 +150,9 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
         tags: u32,
         float: bool,
         fullscreen: bool,
+        urgent: bool,
+        mapped: bool,
+        box: wlr.Box,
     };
 
     var list = std.ArrayList(T).init(util.gpa);
@@ -170,6 +174,9 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
             .tags = tags,
             .float = view.current.float,
             .fullscreen = view.current.fullscreen,
+            .urgent = view.current.urgent,
+            .mapped = view.mapped,
+            .box = view.current.box,
         });
     }
 
