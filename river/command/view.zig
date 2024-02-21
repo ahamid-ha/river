@@ -159,6 +159,9 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
 
     var it = server.root.views.iterator(.forward);
     while (it.next()) |view| {
+        if (view.destroying) {
+            continue;
+        }
         // we only want to know about the view that have and output
         const title = std.mem.span(view.getTitle()) orelse "";
         const appId = std.mem.span(view.getAppId()) orelse "";
