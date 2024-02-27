@@ -214,6 +214,40 @@ pub const ScrollButton = struct {
     }
 };
 
+pub const MapToOutput = struct {
+    output_name: ?[]const u8,
+
+    fn apply(map_to_output: MapToOutput, device: *wlr.InputDevice) void {
+        const wlr_output = blk: {
+            if (map_to_output.output_name) |name| {
+                var it = server.root.active_outputs.iterator(.forward);
+                while (it.next()) |output| {
+                    if (mem.eql(u8, mem.span(output.wlr_output.name), name)) {
+                        break :blk output.wlr_output;
+                    }
+                }
+            }
+            break :blk null;
+        };
+
+        switch (device.type) {
+            .pointer, .touch, .tablet_tool => {
+                log.debug("mapping input '{s}' -> '{s}'", .{
+                    device.name,
+                    if (wlr_output) |o| o.name else "<no output>",
+                });
+
+                // TODO: support multiple seats
+                const seat = server.input_manager.defaultSeat();
+                seat.cursor.wlr_cursor.mapInputToOutput(device, wlr_output);
+            },
+
+            // These devices do not support being mapped to outputs.
+            .keyboard, .tablet_pad, .switch_device => {},
+        }
+    }
+};
+
 glob: []const u8,
 
 // Note: Field names equal name of the setting in the 'input' command.
@@ -232,9 +266,13 @@ tap: ?TapState = null,
 @"pointer-accel": ?PointerAccel = null,
 @"scroll-method": ?ScrollMethod = null,
 @"scroll-button": ?ScrollButton = null,
+@"map-to-output": MapToOutput = .{ .output_name = null },
 
 pub fn deinit(self: *Self) void {
     util.gpa.free(self.glob);
+    if (self.@"map-to-output".output_name) |output_name| {
+        util.gpa.free(output_name);
+    }
 }
 
 pub fn apply(self: *const Self, device: *InputDevice) void {
@@ -244,7 +282,9 @@ pub fn apply(self: *const Self, device: *InputDevice) void {
     inline for (@typeInfo(Self).Struct.fields) |field| {
         if (comptime mem.eql(u8, field.name, "glob")) continue;
 
-        if (@field(self, field.name)) |setting| {
+        if (comptime mem.eql(u8, field.name, "map-to-output")) {
+            @field(self, field.name).apply(device.wlr_device);
+        } else if (@field(self, field.name)) |setting| {
             log.debug("applying setting: {s}", .{field.name});
             setting.apply(libinput_device);
         }
@@ -265,6 +305,17 @@ pub fn parse(self: *Self, setting: []const u8, value: []const u8) !void {
                 const ret = c.libevdev_event_code_from_name(c.EV_KEY, value.ptr);
                 if (ret < 1) return error.InvalidButton;
                 self.@"scroll-button" = ScrollButton{ .button = @intCast(ret) };
+            } else if (comptime mem.eql(u8, field.name, "map-to-output")) {
+                const output_name_owned = blk: {
+                    if (mem.eql(u8, value, "disabled")) {
+                        break :blk null;
+                    } else {
+                        break :blk try util.gpa.dupe(u8, value);
+                    }
+                };
+
+                if (self.@"map-to-output".output_name) |old| util.gpa.free(old);
+                self.@"map-to-output" = .{ .output_name = output_name_owned };
             } else {
                 const T = @typeInfo(field.type).Optional.child;
                 if (@typeInfo(T) != .Enum) {
@@ -286,7 +337,12 @@ pub fn write(self: *Self, writer: anytype) !void {
 
     inline for (@typeInfo(Self).Struct.fields) |field| {
         if (comptime mem.eql(u8, field.name, "glob")) continue;
-        if (@field(self, field.name)) |setting| {
+
+        if (comptime mem.eql(u8, field.name, "map-to-output")) {
+            if (@field(self, field.name).output_name) |output_name| {
+                try writer.print("\tmap-to-output: {s}\n", .{output_name});
+            }
+        } else if (@field(self, field.name)) |setting| {
             // Special-case the settings which are not enums.
             if (comptime mem.eql(u8, field.name, "pointer-accel")) {
                 try writer.print("\tpointer-accel: {d}\n", .{setting.value});
