@@ -580,7 +580,7 @@ fn sendConfigures(root: *Self) void {
             root.inflight_configures,
         });
 
-        root.transaction_timeout.timerUpdate(200) catch {
+        root.transaction_timeout.timerUpdate(50) catch {
             std.log.scoped(.transaction).err("failed to update timer", .{});
             root.commitTransaction();
         };
@@ -785,17 +785,6 @@ fn processOutputConfig(
 
         var proposed_state = wlr.Output.State.init();
         head.state.apply(&proposed_state);
-
-        // Work around a division by zero in the wlroots drm backend.
-        // See https://gitlab.freedesktop.org/wlroots/wlroots/-/issues/3791
-        // TODO(wlroots) remove this workaround after 0.17.2 is out.
-        if (output.wlr_output.isDrm() and
-            proposed_state.committed.mode and
-            proposed_state.mode_type == .custom and
-            proposed_state.custom_mode.refresh == 0)
-        {
-            proposed_state.custom_mode.refresh = 60000;
-        }
 
         switch (action) {
             .test_only => {

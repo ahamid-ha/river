@@ -176,6 +176,8 @@ pub fn init(self: *Self, runtime_xwayland: bool) !void {
     _ = try wlr.SinglePixelBufferManagerV1.create(self.wl_server);
     _ = try wlr.Viewporter.create(self.wl_server);
     _ = try wlr.FractionalScaleManagerV1.create(self.wl_server, 1);
+
+    self.wl_server.setGlobalFilter(*Self, globalFilter, self);
 }
 
 /// Free allocated memory and clean up. Note: order is important here
@@ -228,6 +230,22 @@ pub fn start(self: Self) !void {
             if (c.setenv("DISPLAY", xwayland.display_name, 1) < 0) return error.SetenvError;
         }
     }
+}
+
+fn globalFilter(client: *const wl.Client, global: *const wl.Global, self: *Self) bool {
+    // Only expose the xwalyand_shell_v1 global to the Xwayland process.
+    if (build_options.xwayland) {
+        if (self.xwayland) |xwayland| {
+            if (global == xwayland.shell_v1.global) {
+                if (xwayland.server) |server| {
+                    return client == server.client;
+                }
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 /// Handle SIGINT and SIGTERM by gracefully stopping the server
@@ -337,6 +355,10 @@ fn handleRequestSetCursorShape(
     _: *wl.Listener(*wlr.CursorShapeManagerV1.event.RequestSetShape),
     event: *wlr.CursorShapeManagerV1.event.RequestSetShape,
 ) void {
+    // Ignore requests to set a tablet tool's cursor shape for now
+    // TODO(wlroots): https://gitlab.freedesktop.org/wlroots/wlroots/-/issues/3821
+    if (event.device_type == .tablet_tool) return;
+
     const focused_client = event.seat_client.seat.pointer_state.focused_client;
 
     // This can be sent by any client, so we check to make sure this one is
