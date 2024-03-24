@@ -1,4 +1,4 @@
-RIVERCTL(1) "github.com/riverwm/river" "General Commands Manual"
+RIVERCTL(1) "codeberg.org/river/river" "General Commands Manual"
 
 # NAME
 
@@ -50,9 +50,11 @@ necessarily disjunct), an analogy to workspaces.
 	Focus the next or previous output, the closest output in any direction
 	or an output by name.
 
-*focus-view* *next*|*previous*|*up*|*down*|*left*|*right*
+*focus-view* [*-skip-floating*] *next*|*previous*|*up*|*down*|*left*|*right*
 	Focus the next or previous view in the stack or the closest view in
 	any direction.
+
+	- *-skip-floating*: Skip floating views, only focusing tiled ones.
 
 *move* *up*|*down*|*left*|*right* _delta_
 	Move the focused view in the specified direction by _delta_ logical
@@ -553,7 +555,7 @@ Bind Super+Shift+J to swap the focused view with the next visible view:
 
 Maintained by Isaac Freund <mail@isaacfreund.com> who is assisted by open
 source contributors. For more information about river's development, see
-<https://github.com/riverwm/river>.
+<https://codeberg.org/river/river>.
 
 # SEE ALSO
 
