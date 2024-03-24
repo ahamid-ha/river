@@ -152,6 +152,7 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
         fullscreen: bool,
         urgent: bool,
         mapped: bool,
+        focused: bool,
         box: wlr.Box,
     };
 
@@ -167,6 +168,14 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
         const appId = std.mem.span(view.getAppId()) orelse "";
 
         const name = if (view.current.output) |output| std.mem.span(output.wlr_output.name) else "";
+        var focused = false;
+
+        var seat_it = server.input_manager.seats.first;
+        while (seat_it) |seat_node| : (seat_it = seat_node.next) {
+            if (seat_node.data.focused == .view and seat_node.data.focused.view == view) {
+                focused = true;
+            }
+        }
 
         const tags = view.current.tags;
         try list.append(.{
@@ -179,6 +188,7 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
             .fullscreen = view.current.fullscreen,
             .urgent = view.current.urgent,
             .mapped = view.mapped,
+            .focused = focused,
             .box = view.current.box,
         });
     }
