@@ -141,7 +141,7 @@ pub fn fetchViewById(seat: *Seat, args: []const [:0]const u8, _: *?[]const u8) E
     server.root.applyPending();
 }
 
-pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!void {
+pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!void {
     const T = struct {
         id: []const u8,
         @"app-id": []const u8,
@@ -153,10 +153,12 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
         urgent: bool,
         mapped: bool,
         focused: bool,
+        visible: bool,
         box: wlr.Box,
     };
 
     var list = std.ArrayList(T).init(util.gpa);
+    const focused_output = seat.focused_output orelse return;
 
     var it = server.root.views.iterator(.forward);
     while (it.next()) |view| {
@@ -177,7 +179,7 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
             }
         }
 
-        const tags = view.current.tags;
+        const tags = view.pending.tags;
         try list.append(.{
             .id = view.id,
             .@"app-id" = appId,
@@ -189,7 +191,13 @@ pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!voi
             .urgent = view.current.urgent,
             .mapped = view.mapped,
             .focused = focused,
-            .box = view.current.box,
+            .visible = focused_output.pending.tags & tags != 0,
+            .box = .{
+                .x = view.current.box.x,
+                .y = view.current.box.y,
+                .width = view.current.box.width,
+                .height = view.current.box.height,
+            },
         });
     }
 
