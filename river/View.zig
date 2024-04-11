@@ -234,8 +234,9 @@ pub fn create(impl: Impl) error{OutOfMemory}!*View {
 /// If saved buffers of the view are currently in use by a transaction,
 /// mark this view for destruction when the transaction completes. Otherwise
 /// destroy immediately.
-pub fn destroy(view: *View) void {
+pub fn destroy(view: *View, when: enum { lazy, assert }) void {
     assert(view.impl == .none);
+    assert(!view.mapped);
 
     view.destroying = true;
 
@@ -255,6 +256,11 @@ pub fn destroy(view: *View) void {
         if (view.output_before_evac) |name| util.gpa.free(name);
 
         util.gpa.destroy(view);
+    } else {
+        switch (when) {
+            .lazy => {},
+            .assert => unreachable,
+        }
     }
 }
 
@@ -459,12 +465,14 @@ pub fn configure(view: *View) bool {
     }
 }
 
-pub fn rootSurface(view: View) *wlr.Surface {
-    assert(view.mapped and !view.destroying);
+/// Returns null if the view is currently being destroyed and no longer has
+/// an associated surface.
+/// May also return null for Xwayland views that are not currently mapped.
+pub fn rootSurface(view: View) ?*wlr.Surface {
     return switch (view.impl) {
-        .toplevel => |toplevel| toplevel.rootSurface(),
-        .xwayland_view => |xwayland_view| xwayland_view.rootSurface(),
-        .none => unreachable,
+        .toplevel => |toplevel| toplevel.wlr_toplevel.base.surface,
+        .xwayland_view => |xwayland_view| xwayland_view.xwayland_surface.surface,
+        .none => null,
     };
 }
 
@@ -472,7 +480,7 @@ pub fn sendFrameDone(view: View) void {
     assert(view.mapped and !view.destroying);
     var now: os.timespec = undefined;
     os.clock_gettime(os.CLOCK.MONOTONIC, &now) catch @panic("CLOCK_MONOTONIC not supported");
-    view.rootSurface().sendFrameDone(&now);
+    view.rootSurface().?.sendFrameDone(&now);
 }
 
 pub fn dropSavedSurfaceTree(view: *View) void {
@@ -534,20 +542,17 @@ pub fn setPendingOutput(view: *View, output: *Output) void {
 }
 
 pub fn close(view: View) void {
-    assert(!view.destroying);
     switch (view.impl) {
-        .toplevel => |toplevel| toplevel.close(),
-        .xwayland_view => |xwayland_view| xwayland_view.close(),
-        .none => unreachable,
+        .toplevel => |toplevel| toplevel.wlr_toplevel.sendClose(),
+        .xwayland_view => |xwayland_view| xwayland_view.xwayland_surface.close(),
+        .none => {},
     }
 }
 
 pub fn destroyPopups(view: View) void {
-    assert(!view.destroying);
     switch (view.impl) {
         .toplevel => |toplevel| toplevel.destroyPopups(),
-        .xwayland_view => {},
-        .none => unreachable,
+        .xwayland_view, .none => {},
     }
 }
 
@@ -555,8 +560,8 @@ pub fn destroyPopups(view: View) void {
 pub fn getTitle(view: View) ?[*:0]const u8 {
     assert(!view.destroying);
     return switch (view.impl) {
-        .toplevel => |toplevel| toplevel.getTitle(),
-        .xwayland_view => |xwayland_view| xwayland_view.getTitle(),
+        .toplevel => |toplevel| toplevel.wlr_toplevel.title,
+        .xwayland_view => |xwayland_view| xwayland_view.xwayland_surface.title,
         .none => unreachable,
     };
 }
@@ -565,8 +570,9 @@ pub fn getTitle(view: View) ?[*:0]const u8 {
 pub fn getAppId(view: View) ?[*:0]const u8 {
     assert(!view.destroying);
     return switch (view.impl) {
-        .toplevel => |toplevel| toplevel.getAppId(),
-        .xwayland_view => |xwayland_view| xwayland_view.getAppId(),
+        .toplevel => |toplevel| toplevel.wlr_toplevel.app_id,
+        // X11 clients don't have an app_id but the class serves a similar role.
+        .xwayland_view => |xwayland_view| xwayland_view.xwayland_surface.class,
         .none => unreachable,
     };
 }
