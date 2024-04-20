@@ -1,4 +1,4 @@
-RIVERCTL(1) "codeberg.org/river/river" "General Commands Manual"
+RIVERCTL(1)
 
 # NAME
 
@@ -510,6 +510,11 @@ However note that not every input device supports every property.
 	Enable or disable the natural scroll functionality of the input device. If
 	active, the scroll direction is inverted.
 
+*input* _name_ *scroll-factor* _factor_
+	Set the scroll factor of the input device. Accepts a postive value
+	greater than 0. For example, a _factor_ of 0.5 will make scrolling twice
+	as slow while a _factor_ of 3 will make scrolling 3 times as fast.
+
 *input* _name_ *left-handed* *enabled*|*disabled*
 	Enable or disable the left handed mode of the input device.
 
@@ -555,7 +560,7 @@ Bind Super+Shift+J to swap the focused view with the next visible view:
 
 Maintained by Isaac Freund <mail@isaacfreund.com> who is assisted by open
 source contributors. For more information about river's development, see
-<https://codeberg.org/river/river>.
+<https://isaacfreund.com/software/river>.
 
 # SEE ALSO
 

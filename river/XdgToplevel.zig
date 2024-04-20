@@ -319,11 +319,11 @@ fn handleCommit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
         };
     }
 
-    const old_geometry = toplevel.geometry;
-    toplevel.wlr_toplevel.base.getGeometry(&toplevel.geometry);
-
     switch (toplevel.configure_state) {
         .idle, .committed, .timed_out => {
+            const old_geometry = toplevel.geometry;
+            toplevel.wlr_toplevel.base.getGeometry(&toplevel.geometry);
+
             const size_changed = toplevel.geometry.width != old_geometry.width or
                 toplevel.geometry.height != old_geometry.height;
             const no_layout = view.current.output != null and view.current.output.?.layout == null;
@@ -352,6 +352,11 @@ fn handleCommit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
                 view.pending.box.height = toplevel.geometry.height;
                 view.current = view.inflight;
                 view.updateSceneState();
+            } else if (old_geometry.x != toplevel.geometry.x or
+                old_geometry.y != toplevel.geometry.y)
+            {
+                // We need to update the surface clip box to reflect the geometry change.
+                view.updateSceneState();
             }
         },
         // If the client has not yet acked our configure, we need to send a
@@ -360,6 +365,8 @@ fn handleCommit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
         // stashed buffer from when the transaction started.
         .inflight => view.sendFrameDone(),
         .acked, .timed_out_acked => {
+            toplevel.wlr_toplevel.base.getGeometry(&toplevel.geometry);
+
             if (view.inflight.resizing) {
                 view.resizeUpdatePosition(toplevel.geometry.width, toplevel.geometry.height);
             }

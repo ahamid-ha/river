@@ -44,6 +44,10 @@ destroy: wl.Listener(*wlr.InputDevice) = wl.Listener(*wlr.InputDevice).init(hand
 /// and name. However identifiers of InputConfigs are unique.
 identifier: []const u8,
 
+config: struct {
+    scroll_factor: f32 = 1.0,
+} = .{},
+
 /// InputManager.devices
 link: wl.list.Link,
 

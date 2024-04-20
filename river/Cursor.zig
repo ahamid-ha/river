@@ -309,6 +309,7 @@ fn clearFocus(cursor: *Cursor) void {
 /// Axis event is a scroll wheel or similiar
 fn handleAxis(listener: *wl.Listener(*wlr.Pointer.event.Axis), event: *wlr.Pointer.event.Axis) void {
     const cursor = @fieldParentPtr(Cursor, "axis", listener);
+    const device: *InputDevice = @ptrFromInt(event.device.data);
 
     cursor.seat.handleActivity();
     cursor.unhide();
@@ -317,8 +318,16 @@ fn handleAxis(listener: *wl.Listener(*wlr.Pointer.event.Axis), event: *wlr.Point
     cursor.seat.wlr_seat.pointerNotifyAxis(
         event.time_msec,
         event.orientation,
-        event.delta,
-        event.delta_discrete,
+        event.delta * device.config.scroll_factor,
+        @intFromFloat(math.clamp(
+            @round(@as(f32, @floatFromInt(event.delta_discrete)) * device.config.scroll_factor),
+            // It seems that clamping to exactly the bounds of an i32 is insufficient to make the
+            // @intFromFloat() call safe due to the max/min i32 not being exactly representable
+            // by an f32. Dividing by 2 is a low effort way to ensure the value is in bounds and
+            // allow users to set their scroll-factor to inf without crashing river.
+            math.minInt(i32) / 2,
+            math.maxInt(i32) / 2,
+        )),
         event.source,
     );
 }
