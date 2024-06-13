@@ -55,7 +55,6 @@ pub fn create(wlr_layer_surface: *wlr.LayerSurfaceV1) error{OutOfMemory}!void {
         .scene_layer_surface = try layer_tree.createSceneLayerSurfaceV1(wlr_layer_surface),
         .popup_tree = try output.layers.popups.createSceneTree(),
     };
-    wlr_layer_surface.data = @intFromPtr(layer_surface);
 
     try SceneNodeData.attach(&layer_surface.scene_layer_surface.tree.node, .{ .layer_surface = layer_surface });
     try SceneNodeData.attach(&layer_surface.popup_tree.node, .{ .layer_surface = layer_surface });
@@ -80,7 +79,7 @@ pub fn destroyPopups(layer_surface: *LayerSurface) void {
 }
 
 fn handleDestroy(listener: *wl.Listener(*wlr.LayerSurfaceV1), _: *wlr.LayerSurfaceV1) void {
-    const layer_surface = @fieldParentPtr(LayerSurface, "destroy", listener);
+    const layer_surface: *LayerSurface = @fieldParentPtr("destroy", listener);
 
     log.debug("layer surface '{s}' destroyed", .{layer_surface.wlr_layer_surface.namespace});
 
@@ -93,11 +92,14 @@ fn handleDestroy(listener: *wl.Listener(*wlr.LayerSurfaceV1), _: *wlr.LayerSurfa
 
     layer_surface.popup_tree.node.destroy();
 
+    // The wlr_surface may outlive the wlr_layer_surface so we must clean up the user data.
+    layer_surface.wlr_layer_surface.surface.data = 0;
+
     util.gpa.destroy(layer_surface);
 }
 
 fn handleMap(listener: *wl.Listener(void)) void {
-    const layer_surface = @fieldParentPtr(LayerSurface, "map", listener);
+    const layer_surface: *LayerSurface = @fieldParentPtr("map", listener);
 
     log.debug("layer surface '{s}' mapped", .{layer_surface.wlr_layer_surface.namespace});
 
@@ -107,7 +109,7 @@ fn handleMap(listener: *wl.Listener(void)) void {
 }
 
 fn handleUnmap(listener: *wl.Listener(void)) void {
-    const layer_surface = @fieldParentPtr(LayerSurface, "unmap", listener);
+    const layer_surface: *LayerSurface = @fieldParentPtr("unmap", listener);
 
     log.debug("layer surface '{s}' unmapped", .{layer_surface.wlr_layer_surface.namespace});
 
@@ -117,7 +119,7 @@ fn handleUnmap(listener: *wl.Listener(void)) void {
 }
 
 fn handleCommit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
-    const layer_surface = @fieldParentPtr(LayerSurface, "commit", listener);
+    const layer_surface: *LayerSurface = @fieldParentPtr("commit", listener);
     const wlr_layer_surface = layer_surface.wlr_layer_surface;
 
     assert(wlr_layer_surface.output != null);
@@ -186,7 +188,7 @@ fn handleKeyboardInteractiveExclusive(output: *Output) void {
 }
 
 fn handleNewPopup(listener: *wl.Listener(*wlr.XdgPopup), wlr_xdg_popup: *wlr.XdgPopup) void {
-    const layer_surface = @fieldParentPtr(LayerSurface, "new_popup", listener);
+    const layer_surface: *LayerSurface = @fieldParentPtr("new_popup", listener);
 
     XdgPopup.create(
         wlr_xdg_popup,

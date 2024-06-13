@@ -91,7 +91,7 @@ pub fn focusViewById(seat: *Seat, args: []const [:0]const u8, _: *?[]const u8) E
         .id => viewById(args[2]),
     } orelse return Error.InvalidValue;
 
-    var output = view.current.output orelse return;
+    const output = view.current.output orelse return;
 
     // if (output.pending.tags != view.pending.tags) {
     //     output.previous_tags = output.pending.tags;
@@ -205,7 +205,7 @@ pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!
     }
 
     var buffer = std.ArrayList(u8).init(util.gpa);
-    var arr = try list.toOwnedSlice();
+    const arr = try list.toOwnedSlice();
     try std.json.stringify(arr, .{}, buffer.writer());
     out.* = try buffer.toOwnedSlice();
 }

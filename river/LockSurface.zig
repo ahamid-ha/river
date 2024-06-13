@@ -85,6 +85,9 @@ pub fn destroy(lock_surface: *LockSurface) void {
     lock_surface.map.link.remove();
     lock_surface.surface_destroy.link.remove();
 
+    // The wlr_surface may outlive the wlr_lock_surface so we must clean up the user data.
+    lock_surface.wlr_lock_surface.surface.data = 0;
+
     util.gpa.destroy(lock_surface);
 }
 
@@ -100,7 +103,7 @@ pub fn configure(lock_surface: *LockSurface) void {
 }
 
 fn handleMap(listener: *wl.Listener(void)) void {
-    const lock_surface = @fieldParentPtr(LockSurface, "map", listener);
+    const lock_surface: *LockSurface = @fieldParentPtr("map", listener);
     const output = lock_surface.getOutput();
 
     output.normal_content.node.setEnabled(false);
@@ -132,7 +135,7 @@ fn updateFocus(lock_surface: *LockSurface) void {
 }
 
 fn handleDestroy(listener: *wl.Listener(void)) void {
-    const lock_surface = @fieldParentPtr(LockSurface, "surface_destroy", listener);
+    const lock_surface: *LockSurface = @fieldParentPtr("surface_destroy", listener);
 
     lock_surface.destroy();
 }

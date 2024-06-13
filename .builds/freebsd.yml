@@ -18,6 +18,7 @@ packages:
   - x11/xcb-util-renderutil
   - x11/xcb-util-wm
   - x11-servers/xwayland
+  - security/ca_root_nss
   - sysutils/seatd
   - sysutils/libdisplay-info
   - gmake
@@ -42,17 +43,17 @@ tasks:
       sudo ninja -C build/ install
       cd ..
 
-      wget -nv https://ziglang.org/download/0.11.0/zig-freebsd-x86_64-0.11.0.tar.xz
-      # Remove a lot of useless lines from tar output.
-      tar -xvf zig-freebsd-x86_64-0.11.0.tar.xz 1>/dev/null
-      sudo mv zig-freebsd-x86_64-0.11.0/zig /usr/bin/
-      sudo mv zig-freebsd-x86_64-0.11.0/lib /usr/lib/zig
+      # Eat Github's resources rather than the Zig Software Foundation's resources!
+      wget -nv https://github.com/ifreund/zig-tarball-mirror/releases/download/0.13.0/zig-freebsd-x86_64-0.13.0.tar.xz
+      tar xf zig-freebsd-x86_64-0.13.0.tar.xz
+      sudo mv zig-freebsd-x86_64-0.13.0/zig /usr/bin/
+      sudo mv zig-freebsd-x86_64-0.13.0/lib /usr/lib/zig
   - build: |
       cd river
-      zig build
+      zig build --summary all
   - build_xwayland: |
       cd river
-      zig build -Dxwayland
+      zig build --summary all -Dxwayland
   - fmt: |
       cd river
       zig fmt --check river/

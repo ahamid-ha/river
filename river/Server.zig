@@ -19,6 +19,7 @@ const Server = @This();
 const build_options = @import("build_options");
 const std = @import("std");
 const assert = std.debug.assert;
+const posix = std.posix;
 const rand = std.rand;
 const os = std.os;
 const wlr = @import("wlroots");
@@ -115,8 +116,8 @@ pub fn init(server: *Server, runtime_xwayland: bool) !void {
     // since river will exit during initialization anyway if there is an error.
     // This keeps the code simpler and more readable.
 
-    var now: os.timespec = undefined;
-    os.clock_gettime(os.CLOCK.MONOTONIC, &now) catch @panic("CLOCK_MONOTONIC not supported!");
+    var now: posix.timespec = undefined;
+    posix.clock_gettime(posix.CLOCK.MONOTONIC, &now) catch @panic("CLOCK_MONOTONIC not supported!");
 
     const wl_server = try wl.Server.create();
 
@@ -130,8 +131,8 @@ pub fn init(server: *Server, runtime_xwayland: bool) !void {
     server.* = .{
         .wl_server = wl_server,
         .rng = rand.DefaultPrng.init(@intCast(now.tv_nsec)),
-        .sigint_source = try loop.addSignal(*wl.Server, std.os.SIG.INT, terminate, wl_server),
-        .sigterm_source = try loop.addSignal(*wl.Server, std.os.SIG.TERM, terminate, wl_server),
+        .sigint_source = try loop.addSignal(*wl.Server, posix.SIG.INT, terminate, wl_server),
+        .sigterm_source = try loop.addSignal(*wl.Server, posix.SIG.TERM, terminate, wl_server),
 
         .backend = backend,
         .session = session,
@@ -297,21 +298,17 @@ fn allowlist(server: *Server, global: *const wl.Global) bool {
     if (server.drm) |drm| if (global == drm.global) return true;
     if (server.linux_dmabuf) |linux_dmabuf| if (global == linux_dmabuf.global) return true;
 
-    {
-        var it = server.root.all_outputs.iterator(.forward);
-        while (it.next()) |output| {
-            if (global == output.wlr_output.global) return true;
-        }
-    }
-
-    {
-        var it = server.input_manager.seats.first;
-        while (it) |node| : (it = node.next) {
-            if (global == node.data.wlr_seat.global) return true;
-        }
-    }
-
-    return global == hackGlobal(server.shm) or
+    // We must use the getInterface() approach for dynamically created globals
+    // such as wl_output and wl_seat since the wl_global_create() function will
+    // advertise the global to clients and invoke this filter before returning
+    // the new global pointer.
+    //
+    // For other globals I like the current pointer comparison approach as it
+    // should catch river accidentally exposing multiple copies of e.g. wl_shm
+    // with an assertion failure.
+    return global.getInterface() == wl.Output.getInterface() or
+        global.getInterface() == wl.Seat.getInterface() or
+        global == hackGlobal(server.shm) or
         global == hackGlobal(server.single_pixel_buffer_manager) or
         global == server.viewporter.global or
         global == server.fractional_scale_manager.global or
@@ -383,7 +380,7 @@ fn handleNewToplevelDecoration(
 }
 
 fn handleNewLayerSurface(listener: *wl.Listener(*wlr.LayerSurfaceV1), wlr_layer_surface: *wlr.LayerSurfaceV1) void {
-    const server = @fieldParentPtr(Server, "new_layer_surface", listener);
+    const server: *Server = @fieldParentPtr("new_layer_surface", listener);
 
     log.debug(
         "new layer surface: namespace {s}, layer {s}, anchor {b:0>4}, size {},{}, margin {},{},{},{}, exclusive_zone {}",
@@ -443,7 +440,7 @@ fn handleRequestActivate(
     listener: *wl.Listener(*wlr.XdgActivationV1.event.RequestActivate),
     event: *wlr.XdgActivationV1.event.RequestActivate,
 ) void {
-    const server = @fieldParentPtr(Server, "request_activate", listener);
+    const server: *Server = @fieldParentPtr("request_activate", listener);
 
     const node_data = SceneNodeData.fromSurface(event.surface) orelse return;
     switch (node_data.data) {
