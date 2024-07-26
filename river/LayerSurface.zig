@@ -66,11 +66,6 @@ pub fn create(wlr_layer_surface: *wlr.LayerSurfaceV1) error{OutOfMemory}!void {
     wlr_layer_surface.surface.events.unmap.add(&layer_surface.unmap);
     wlr_layer_surface.surface.events.commit.add(&layer_surface.commit);
     wlr_layer_surface.events.new_popup.add(&layer_surface.new_popup);
-
-    // wlroots only informs us of the new surface after the first commit,
-    // so our listener does not get called for this first commit. However,
-    // we do want our listener called in order to send the initial configure.
-    handleCommit(&layer_surface.commit, wlr_layer_surface.surface);
 }
 
 pub fn destroyPopups(layer_surface: *LayerSurface) void {
@@ -100,11 +95,19 @@ fn handleDestroy(listener: *wl.Listener(*wlr.LayerSurfaceV1), _: *wlr.LayerSurfa
 
 fn handleMap(listener: *wl.Listener(void)) void {
     const layer_surface: *LayerSurface = @fieldParentPtr("map", listener);
+    const wlr_surface = layer_surface.wlr_layer_surface;
 
-    log.debug("layer surface '{s}' mapped", .{layer_surface.wlr_layer_surface.namespace});
+    log.debug("layer surface '{s}' mapped", .{wlr_surface.namespace});
 
     layer_surface.output.arrangeLayers();
-    handleKeyboardInteractiveExclusive(layer_surface.output);
+
+    const consider = wlr_surface.current.keyboard_interactive == .on_demand and
+        (wlr_surface.current.layer == .top or wlr_surface.current.layer == .overlay);
+    handleKeyboardInteractiveExclusive(
+        layer_surface.output,
+        if (consider) layer_surface else null,
+    );
+
     server.root.applyPending();
 }
 
@@ -114,7 +117,7 @@ fn handleUnmap(listener: *wl.Listener(void)) void {
     log.debug("layer surface '{s}' unmapped", .{layer_surface.wlr_layer_surface.namespace});
 
     layer_surface.output.arrangeLayers();
-    handleKeyboardInteractiveExclusive(layer_surface.output);
+    handleKeyboardInteractiveExclusive(layer_surface.output, null);
     server.root.applyPending();
 }
 
@@ -134,18 +137,20 @@ fn handleCommit(listener: *wl.Listener(*wlr.Surface), _: *wlr.Surface) void {
         @as(u32, @bitCast(wlr_layer_surface.current.committed)) != 0)
     {
         layer_surface.output.arrangeLayers();
-        handleKeyboardInteractiveExclusive(layer_surface.output);
+        handleKeyboardInteractiveExclusive(layer_surface.output, null);
         server.root.applyPending();
     }
 }
 
+/// Focus topmost keyboard-interactivity-exclusive layer surface above normal
+/// content, or if none found, focus the surface given as `consider`.
 /// Requires a call to Root.applyPending()
-fn handleKeyboardInteractiveExclusive(output: *Output) void {
+fn handleKeyboardInteractiveExclusive(output: *Output, consider: ?*LayerSurface) void {
     if (server.lock_manager.state != .unlocked) return;
 
-    // Find the topmost layer surface in the top or overlay layers which
-    // requests keyboard interactivity if any.
-    const topmost_surface = outer: for ([_]zwlr.LayerShellV1.Layer{ .overlay, .top }) |layer| {
+    // Find the topmost layer surface (if any) in the top or overlay layers which
+    // requests exclusive keyboard interactivity.
+    const to_focus = outer: for ([_]zwlr.LayerShellV1.Layer{ .overlay, .top }) |layer| {
         const tree = output.layerSurfaceTree(layer);
         // Iterate in reverse to match rendering order.
         var it = tree.children.iterator(.reverse);
@@ -161,17 +166,21 @@ fn handleKeyboardInteractiveExclusive(output: *Output) void {
                 }
             }
         }
-    } else null;
+    } else consider;
+
+    if (to_focus) |s| {
+        assert(s.wlr_layer_surface.current.keyboard_interactive != .none);
+    }
 
     var it = server.input_manager.seats.first;
     while (it) |node| : (it = node.next) {
         const seat = &node.data;
 
         if (seat.focused_output == output) {
-            if (topmost_surface) |to_focus| {
+            if (to_focus) |s| {
                 // If we found a surface on the output that requires focus, grab the focus of all
                 // seats that are focusing that output.
-                seat.setFocusRaw(.{ .layer = to_focus });
+                seat.setFocusRaw(.{ .layer = s });
                 continue;
             }
         }

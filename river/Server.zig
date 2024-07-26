@@ -40,6 +40,7 @@ const Root = @import("Root.zig");
 const Seat = @import("Seat.zig");
 const SceneNodeData = @import("SceneNodeData.zig");
 const StatusManager = @import("StatusManager.zig");
+const TabletTool = @import("TabletTool.zig");
 const XdgDecoration = @import("XdgDecoration.zig");
 const XdgToplevel = @import("XdgToplevel.zig");
 const XwaylandOverrideRedirect = @import("XwaylandOverrideRedirect.zig");
@@ -100,8 +101,10 @@ xwayland: if (build_options.xwayland) ?*wlr.Xwayland else void = if (build_optio
 new_xwayland_surface: if (build_options.xwayland) wl.Listener(*wlr.XwaylandSurface) else void =
     if (build_options.xwayland) wl.Listener(*wlr.XwaylandSurface).init(handleNewXwaylandSurface),
 
-new_xdg_surface: wl.Listener(*wlr.XdgSurface) =
-    wl.Listener(*wlr.XdgSurface).init(handleNewXdgSurface),
+renderer_lost: wl.Listener(void) = wl.Listener(void).init(handleRendererLost),
+
+new_xdg_toplevel: wl.Listener(*wlr.XdgToplevel) =
+    wl.Listener(*wlr.XdgToplevel).init(handleNewXdgToplevel),
 new_toplevel_decoration: wl.Listener(*wlr.XdgToplevelDecorationV1) =
     wl.Listener(*wlr.XdgToplevelDecorationV1).init(handleNewToplevelDecoration),
 new_layer_surface: wl.Listener(*wlr.LayerSurfaceV1) =
@@ -120,14 +123,14 @@ pub fn init(server: *Server, runtime_xwayland: bool) !void {
     posix.clock_gettime(posix.CLOCK.MONOTONIC, &now) catch @panic("CLOCK_MONOTONIC not supported!");
 
     const wl_server = try wl.Server.create();
+    const loop = wl_server.getEventLoop();
 
     var session: ?*wlr.Session = undefined;
-    const backend = try wlr.Backend.autocreate(wl_server, &session);
+    const backend = try wlr.Backend.autocreate(loop, &session);
     const renderer = try wlr.Renderer.autocreate(backend);
 
     const compositor = try wlr.Compositor.create(wl_server, 6, renderer);
 
-    const loop = wl_server.getEventLoop();
     server.* = .{
         .wl_server = wl_server,
         .rng = rand.DefaultPrng.init(@intCast(now.tv_nsec)),
@@ -175,7 +178,7 @@ pub fn init(server: *Server, runtime_xwayland: bool) !void {
         .lock_manager = undefined,
     };
 
-    if (renderer.getDmabufFormats() != null and renderer.getDrmFd() >= 0) {
+    if (renderer.getTextureFormats(@intFromEnum(wlr.BufferCap.dmabuf)) != null) {
         // wl_drm is a legacy interface and all clients should switch to linux_dmabuf.
         // However, enough widely used clients still rely on wl_drm that the pragmatic option
         // is to keep it around for the near future.
@@ -198,7 +201,8 @@ pub fn init(server: *Server, runtime_xwayland: bool) !void {
     try server.idle_inhibit_manager.init();
     try server.lock_manager.init();
 
-    server.xdg_shell.events.new_surface.add(&server.new_xdg_surface);
+    server.renderer.events.lost.add(&server.renderer_lost);
+    server.xdg_shell.events.new_toplevel.add(&server.new_xdg_toplevel);
     server.xdg_decoration_manager.events.new_toplevel_decoration.add(&server.new_toplevel_decoration);
     server.layer_shell.events.new_surface.add(&server.new_layer_surface);
     server.xdg_activation.events.request_activate.add(&server.request_activate);
@@ -212,7 +216,8 @@ pub fn deinit(server: *Server) void {
     server.sigint_source.remove();
     server.sigterm_source.remove();
 
-    server.new_xdg_surface.link.remove();
+    server.renderer_lost.link.remove();
+    server.new_xdg_toplevel.link.remove();
     server.new_toplevel_decoration.link.remove();
     server.new_layer_surface.link.remove();
     server.request_activate.link.remove();
@@ -285,14 +290,6 @@ fn globalFilter(client: *const wl.Client, global: *const wl.Global, server: *Ser
     }
 }
 
-fn hackGlobal(ptr: *anyopaque) *wl.Global {
-    // TODO(wlroots) MR that eliminates the need for this hack:
-    // https://gitlab.freedesktop.org/wlroots/wlroots/-/merge_requests/4612
-    if (wlr.version.major != 0 or wlr.version.minor != 17) @compileError("FIXME");
-
-    return @as(*extern struct { global: *wl.Global }, @alignCast(@ptrCast(ptr))).global;
-}
-
 /// Returns true if the global is allowlisted for security contexts
 fn allowlist(server: *Server, global: *const wl.Global) bool {
     if (server.drm) |drm| if (global == drm.global) return true;
@@ -308,8 +305,8 @@ fn allowlist(server: *Server, global: *const wl.Global) bool {
     // with an assertion failure.
     return global.getInterface() == wl.Output.getInterface() or
         global.getInterface() == wl.Seat.getInterface() or
-        global == hackGlobal(server.shm) or
-        global == hackGlobal(server.single_pixel_buffer_manager) or
+        global == server.shm.global or
+        global == server.single_pixel_buffer_manager.global or
         global == server.viewporter.global or
         global == server.fractional_scale_manager.global or
         global == server.compositor.global or
@@ -344,7 +341,7 @@ fn blocklist(server: *Server, global: *const wl.Global) bool {
         global == server.root.output_manager.global or
         global == server.root.power_manager.global or
         global == server.root.gamma_control_manager.global or
-        global == hackGlobal(server.input_manager.idle_notifier) or
+        global == server.input_manager.idle_notifier.global or
         global == server.input_manager.virtual_pointer_manager.global or
         global == server.input_manager.virtual_keyboard_manager.global or
         global == server.input_manager.input_method_manager.global or
@@ -357,17 +354,55 @@ fn terminate(_: c_int, wl_server: *wl.Server) c_int {
     return 0;
 }
 
-fn handleNewXdgSurface(_: *wl.Listener(*wlr.XdgSurface), xdg_surface: *wlr.XdgSurface) void {
-    if (xdg_surface.role == .popup) {
-        log.debug("new xdg_popup", .{});
-        return;
+fn handleRendererLost(listener: *wl.Listener(void)) void {
+    const server: *Server = @fieldParentPtr("renderer_lost", listener);
+
+    log.info("recovering from GPU reset", .{});
+
+    // There's not much that can be done if creating a new renderer or allocator fails.
+    // With luck there might be another GPU reset after which we try again and succeed.
+
+    server.recoverFromGpuReset() catch |err| switch (err) {
+        error.RendererCreateFailed => log.err("failed to create new renderer after GPU reset", .{}),
+        error.AllocatorCreateFailed => log.err("failed to create new allocator after GPU reset", .{}),
+    };
+}
+
+fn recoverFromGpuReset(server: *Server) !void {
+    const new_renderer = try wlr.Renderer.autocreate(server.backend);
+    errdefer new_renderer.destroy();
+
+    const new_allocator = try wlr.Allocator.autocreate(server.backend, new_renderer);
+    errdefer comptime unreachable; // no failure allowed after this point
+
+    server.renderer_lost.link.remove();
+    new_renderer.events.lost.add(&server.renderer_lost);
+
+    server.compositor.setRenderer(new_renderer);
+
+    {
+        var it = server.root.all_outputs.iterator(.forward);
+        while (it.next()) |output| {
+            // This should never fail here as failure with this combination of
+            // renderer, allocator, and backend should have prevented creating
+            // the output in the first place.
+            _ = output.wlr_output.initRender(new_allocator, new_renderer);
+        }
     }
 
+    server.renderer.destroy();
+    server.renderer = new_renderer;
+
+    server.allocator.destroy();
+    server.allocator = new_allocator;
+}
+
+fn handleNewXdgToplevel(_: *wl.Listener(*wlr.XdgToplevel), xdg_toplevel: *wlr.XdgToplevel) void {
     log.debug("new xdg_toplevel", .{});
 
-    XdgToplevel.create(xdg_surface.role_data.toplevel.?) catch {
+    XdgToplevel.create(xdg_toplevel) catch {
         log.err("out of memory", .{});
-        xdg_surface.resource.postNoMemory();
+        xdg_toplevel.resource.postNoMemory();
         return;
     };
 }
@@ -458,18 +493,28 @@ fn handleRequestSetCursorShape(
     _: *wl.Listener(*wlr.CursorShapeManagerV1.event.RequestSetShape),
     event: *wlr.CursorShapeManagerV1.event.RequestSetShape,
 ) void {
-    // Ignore requests to set a tablet tool's cursor shape for now
-    // TODO(wlroots): https://gitlab.freedesktop.org/wlroots/wlroots/-/issues/3821
-    if (event.device_type == .tablet_tool) return;
+    const seat: *Seat = @ptrFromInt(event.seat_client.seat.data);
 
-    const focused_client = event.seat_client.seat.pointer_state.focused_client;
+    if (event.tablet_tool) |wp_tool| {
+        assert(event.device_type == .tablet_tool);
 
-    // This can be sent by any client, so we check to make sure this one is
-    // actually has pointer focus first.
-    if (focused_client == event.seat_client) {
-        const seat: *Seat = @ptrFromInt(event.seat_client.seat.data);
-        const name = wlr.CursorShapeManagerV1.shapeName(event.shape);
-        seat.cursor.setXcursor(name);
+        const tool = TabletTool.get(event.seat_client.seat, wp_tool.wlr_tool) catch return;
+
+        if (tool.allowSetCursor(event.seat_client, event.serial)) {
+            const name = wlr.CursorShapeManagerV1.shapeName(event.shape);
+            tool.wlr_cursor.setXcursor(seat.cursor.xcursor_manager, name);
+        }
+    } else {
+        assert(event.device_type == .pointer);
+
+        const focused_client = event.seat_client.seat.pointer_state.focused_client;
+
+        // This can be sent by any client, so we check to make sure this one is
+        // actually has pointer focus first.
+        if (focused_client == event.seat_client) {
+            const name = wlr.CursorShapeManagerV1.shapeName(event.shape);
+            seat.cursor.setXcursor(name);
+        }
     }
 }
 

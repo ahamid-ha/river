@@ -7,7 +7,7 @@
 River is a dynamic tiling Wayland compositor with flexible runtime
 configuration.
 
-Install from your [package manager](https://repology.org/project/river/versions) —
+Check [packaging status](https://repology.org/project/river/versions) —
 Join us at [#river](https://web.libera.chat/?channels=#river) on irc.libera.chat —
 Read our man pages, [wiki](https://codeberg.org/river/wiki), and
 [Code of Conduct](CODE_OF_CONDUCT.md)
@@ -60,7 +60,7 @@ distribution.
 - [zig](https://ziglang.org/download/) 0.13
 - wayland
 - wayland-protocols
-- [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) 0.17.2
+- [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) 0.18
 - xkbcommon
 - libevdev
 - pixman
@@ -72,6 +72,7 @@ Then run, for example:
 zig build -Doptimize=ReleaseSafe --prefix ~/.local install
 ```
 To enable Xwayland support pass the `-Dxwayland` option as well.
+Run `zig build -h` to see a list of all options.
 
 ## Usage
 

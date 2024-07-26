@@ -165,14 +165,21 @@ pub fn focus(seat: *Seat, _target: ?*View) void {
     // Views may not receive focus while locked.
     if (server.lock_manager.state != .unlocked) return;
 
-    // While a layer surface is exclusively focused, views may not receive focus
+    // A layer surface with exclusive focus will prevent any view from gaining
+    // focus if it is on the top or overlay layer. Otherwise, only steal focus
+    // from a focused layer surface if there is an explicit target view.
     if (seat.focused == .layer) {
         const wlr_layer_surface = seat.focused.layer.wlr_layer_surface;
         assert(wlr_layer_surface.surface.mapped);
-        if (wlr_layer_surface.current.keyboard_interactive == .exclusive and
-            (wlr_layer_surface.current.layer == .top or wlr_layer_surface.current.layer == .overlay))
-        {
-            return;
+        switch (wlr_layer_surface.current.keyboard_interactive) {
+            .none => {},
+            .exclusive => switch (wlr_layer_surface.current.layer) {
+                .top, .overlay => return,
+                .bottom, .background => if (target == null) return,
+                _ => {},
+            },
+            .on_demand => if (target == null) return,
+            _ => {},
         }
     }
 
@@ -500,11 +507,11 @@ fn tryAddDevice(seat: *Seat, wlr_device: *wlr.InputDevice) !void {
 
             seat.cursor.wlr_cursor.attachInputDevice(wlr_device);
         },
-        .tablet_tool => {
+        .tablet => {
             try Tablet.create(seat, wlr_device);
             seat.cursor.wlr_cursor.attachInputDevice(wlr_device);
         },
-        .switch_device => {
+        .@"switch" => {
             const switch_device = try util.gpa.create(Switch);
             errdefer util.gpa.destroy(switch_device);
 
@@ -527,7 +534,7 @@ pub fn updateCapabilities(seat: *Seat) void {
             switch (device.wlr_device.type) {
                 .keyboard => capabilities.keyboard = true,
                 .touch => capabilities.touch = true,
-                .pointer, .switch_device, .tablet_tool => {},
+                .pointer, .@"switch", .tablet => {},
                 .tablet_pad => unreachable,
             }
         }
