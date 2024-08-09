@@ -168,6 +168,9 @@ pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!
         if (!view.mapped) {
             continue;
         }
+        if (view.current.output == null) {
+            continue;
+        }
         // we only want to know about the view that have and output
         const title = std.mem.span(view.getTitle()) orelse "";
         const appId = std.mem.span(view.getAppId()) orelse "";
