@@ -158,6 +158,7 @@ pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!
     };
 
     var list = std.ArrayList(T).init(util.gpa);
+    defer list.deinit();
     const focused_output = seat.focused_output orelse return;
 
     var it = server.root.views.iterator(.forward);
@@ -168,14 +169,17 @@ pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!
         if (!view.mapped) {
             continue;
         }
+        if (view.impl == .none) {
+            continue;
+        }
         if (view.current.output == null) {
             continue;
         }
         // we only want to know about the view that have and output
-        const title = std.mem.span(view.getTitle()) orelse "";
-        const appId = std.mem.span(view.getAppId()) orelse "";
+        const title = std.mem.span(view.getTitle()) orelse continue;
+        const appId = std.mem.span(view.getAppId()) orelse continue;
 
-        const name = if (view.current.output) |output| std.mem.span(output.wlr_output.name) else "";
+        const name = if (view.current.output) |output| std.mem.span(output.wlr_output.name) else continue;
         var focused = false;
 
         var seat_it = server.input_manager.seats.first;
@@ -209,6 +213,6 @@ pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!
 
     var buffer = std.ArrayList(u8).init(util.gpa);
     const arr = try list.toOwnedSlice();
-    try std.json.stringify(arr, .{}, buffer.writer());
+    try std.json.stringify(arr, .{ .escape_unicode = true }, buffer.writer());
     out.* = try buffer.toOwnedSlice();
 }
