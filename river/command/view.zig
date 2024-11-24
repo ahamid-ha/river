@@ -109,6 +109,28 @@ pub fn focusViewById(seat: *Seat, args: []const [:0]const u8, _: *?[]const u8) E
     server.root.applyPending();
 }
 
+pub fn minimizeViewById(seat: *Seat, args: []const [:0]const u8, _: *?[]const u8) Error!void {
+    if (args.len < 3) return Error.NotEnoughArguments;
+    if (args.len > 3) return Error.TooManyArguments;
+
+    // If the fallback pseudo-output is focused, there is nowhere to send the view
+    if (seat.focused_output == null) {
+        assert(server.root.active_outputs.empty());
+        return;
+    }
+
+    const arg = std.meta.stringToEnum(SearchField, args[1]) orelse return Error.InvalidValue;
+
+    const view = switch (arg) {
+        .@"app-id" => viewByAppId(args[2]),
+        .title => viewByTitle(args[2]),
+        .id => viewById(args[2]),
+    } orelse return Error.InvalidValue;
+
+    view.pending.minimized = true;
+    server.root.applyPending();
+}
+
 pub fn fetchViewById(seat: *Seat, args: []const [:0]const u8, _: *?[]const u8) Error!void {
     if (args.len < 3) return Error.NotEnoughArguments;
     if (args.len > 3) return Error.TooManyArguments;
@@ -141,7 +163,7 @@ pub fn fetchViewById(seat: *Seat, args: []const [:0]const u8, _: *?[]const u8) E
     server.root.applyPending();
 }
 
-pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!void {
+pub fn listViews(_: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!void {
     const T = struct {
         id: []const u8,
         @"app-id": []const u8,
@@ -150,6 +172,7 @@ pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!
         tags: u32,
         float: bool,
         fullscreen: bool,
+        //minimized: bool,
         urgent: bool,
         mapped: bool,
         focused: bool,
@@ -159,56 +182,64 @@ pub fn listViews(seat: *Seat, _: []const [:0]const u8, out: *?[]const u8) Error!
 
     var list = std.ArrayList(T).init(util.gpa);
     defer list.deinit();
-    const focused_output = seat.focused_output orelse return;
 
-    var it = server.root.views.iterator(.forward);
-    while (it.next()) |view| {
-        if (view.destroying) {
-            continue;
-        }
-        if (!view.mapped) {
-            continue;
-        }
-        if (view.impl == .none) {
-            continue;
-        }
-        if (view.current.output == null) {
-            continue;
-        }
-        // we only want to know about the view that have and output
-        const title = std.mem.span(view.getTitle()) orelse continue;
-        const appId = std.mem.span(view.getAppId()) orelse continue;
-
-        const name = if (view.current.output) |output| std.mem.span(output.wlr_output.name) else continue;
-        var focused = false;
-
-        var seat_it = server.input_manager.seats.first;
-        while (seat_it) |seat_node| : (seat_it = seat_node.next) {
-            if (seat_node.data.focused == .view and seat_node.data.focused.view == view) {
-                focused = true;
+    var output_it = server.root.active_outputs.iterator(.forward);
+    while (output_it.next()) |output| {
+        var it = output.pending.wm_stack.iterator(.forward);
+        while (it.next()) |view| {
+            if (view.destroying) {
+                continue;
             }
-        }
+            if (!view.mapped) {
+                continue;
+            }
+            if (view.impl == .none) {
+                continue;
+            }
+            if (view.current.output == null) {
+                continue;
+            }
+            // we only want to know about the view that have and output
+            const title = std.mem.span(view.getTitle()) orelse continue;
+            const appId = std.mem.span(view.getAppId()) orelse continue;
 
-        const tags = view.pending.tags;
-        try list.append(.{
-            .id = view.id,
-            .@"app-id" = appId,
-            .title = title,
-            .output = name,
-            .tags = tags,
-            .float = view.current.float,
-            .fullscreen = view.current.fullscreen,
-            .urgent = view.current.urgent,
-            .mapped = view.mapped,
-            .focused = focused,
-            .visible = focused_output.pending.tags & tags != 0,
-            .box = .{
-                .x = view.current.box.x,
-                .y = view.current.box.y,
-                .width = view.current.box.width,
-                .height = view.current.box.height,
-            },
-        });
+            const name = std.mem.span(output.wlr_output.name);
+            var focused = false;
+
+            var seat_it = server.input_manager.seats.first;
+            while (seat_it) |seat_node| : (seat_it = seat_node.next) {
+                if (seat_node.data.focused == .view and seat_node.data.focused.view == view) {
+                    focused = true;
+                }
+            }
+
+            const tags = view.pending.tags;
+            if (!(output.pending.tags & tags != 0)) {
+                // seems stringify fails with big arrays
+                continue;
+            }
+
+            try list.insert(0, .{
+                .id = view.id,
+                .@"app-id" = appId,
+                .title = title,
+                .output = name,
+                .tags = tags,
+                .float = view.current.float,
+                .fullscreen = view.current.fullscreen,
+                //.minimized = view.current.minimized,
+                .urgent = view.current.urgent,
+                .mapped = view.mapped,
+                .focused = focused,
+                .visible = output.pending.tags & tags != 0,
+                .box = .{
+                    .x = view.current.box.x,
+                    .y = view.current.box.y,
+                    .width = view.current.box.width,
+                    .height = view.current.box.height,
+                },
+            });
+        }
     }
 
     var buffer = std.ArrayList(u8).init(util.gpa);
