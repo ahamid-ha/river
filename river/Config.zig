@@ -68,6 +68,9 @@ pub const Dimensions = struct {
     height: u31,
 };
 
+/// Whether to allow tearing page flips when fullscreen if a view requests it.
+allow_tearing: bool = false,
+
 /// Color of background in RGBA with premultiplied alpha (alpha should only affect nested sessions)
 background_color: [4]f32 = [_]f32{ 0.0, 0.16862745, 0.21176471, 1.0 }, // Solarized base03
 
@@ -98,6 +101,7 @@ rules: struct {
     position: RuleList(Position) = .{},
     dimensions: RuleList(Dimensions) = .{},
     fullscreen: RuleList(bool) = .{},
+    tearing: RuleList(bool) = .{},
 } = .{},
 
 /// The selected focus_follows_cursor mode

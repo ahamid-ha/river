@@ -24,6 +24,20 @@ const Error = @import("../command.zig").Error;
 const Seat = @import("../Seat.zig");
 const Config = @import("../Config.zig");
 
+pub fn allowTearing(
+    _: *Seat,
+    args: []const [:0]const u8,
+    _: *?[]const u8,
+) Error!void {
+    if (args.len < 2) return Error.NotEnoughArguments;
+    if (args.len > 2) return Error.TooManyArguments;
+
+    const arg = std.meta.stringToEnum(enum { enabled, disabled }, args[1]) orelse
+        return Error.UnknownOption;
+
+    server.config.allow_tearing = arg == .enabled;
+}
+
 pub fn borderWidth(
     _: *Seat,
     args: []const [:0]const u8,

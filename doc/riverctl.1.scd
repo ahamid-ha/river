@@ -307,11 +307,16 @@ matches everything while _\*\*_ and the empty string are invalid.
 	- *fullscreen*: Make the view fullscreen. Applies only to new views.
 	- *no-fullscreen*: Don't make the view fullscreen. Applies only to
 	  new views.
+	- *tearing*: Allow the view to tear when fullscreen regardless of the
+	  view's preference. Applies to new and existing views.
+	- *no-tearing*: Disable tearing for the view regardless of the view's
+	  preference. Applies to new and existing views.
 
 	Both *float* and *no-float* rules are added to the same list,
 	which means that adding a *no-float* rule with the same arguments
 	as a *float* rule will overwrite it. The same holds for *ssd* and
-	*csd*, *fullscreen* and *no-fullscreen* rules.
+	*csd*, *fullscreen* and *no-fullscreen*, *tearing* and
+	*no-tearing* rules.
 
 	If multiple rules in a list match a given view the most specific
 	rule will be applied. For example with the following rules
@@ -363,6 +368,10 @@ matches everything while _\*\*_ and the empty string are invalid.
 *output-attach-mode* *top*|*bottom*|*above*|*below*|*after <N>*
 	Set the attach mode of the currently focused output, overriding the value of
 	default-attach-mode if any.
+
+*allow-tearing* *enabled*|*disabled*
+	Allow fullscreen views to tear if requested by the view. See also the
+	*tearing* rule to force enable tearing for specific views.
 
 *background-color* _0xRRGGBB_|_0xRRGGBBAA_
 	Set the background color.
@@ -418,7 +427,8 @@ matches everything while _\*\*_ and the empty string are invalid.
 
 *set-repeat* _rate_ _delay_
 	Set the keyboard repeat rate to _rate_ key repeats per second and
-	repeat delay to _delay_ milliseconds.
+	repeat delay to _delay_ milliseconds. The default is a rate of 25
+	repeats per second and a delay of 600ms.
 
 *xcursor-theme* _theme_name_ [_size_]
 	Set the xcursor theme to _theme_name_ and optionally set the _size_.
@@ -540,6 +550,11 @@ However note that not every input device supports every property.
 *input* _name_ *scroll-button* _button_
 	Set the scroll button of an input device. _button_ is the name of a Linux
 	input event code.
+
+*input* _name_ *scroll-button-lock* *enabled*|*disabled*
+	Enable or disable the scroll button lock functionality of the input device. If
+	active, the button does not need to be held down. One press makes the button
+	considered to be held down, and a second press releases the button.
 
 *input* _name_ *map-to-output* _output_|*disabled*
 	Maps the input to a given output. This is valid even if the output isn't

@@ -23,6 +23,7 @@ const math = std.math;
 const posix = std.posix;
 const wlr = @import("wlroots");
 const wl = @import("wayland").server.wl;
+const wp = @import("wayland").server.wp;
 
 const server = &@import("main.zig").server;
 const util = @import("util.zig");
@@ -57,6 +58,12 @@ const Impl = union(enum) {
 const AttachRelativeMode = enum {
     above,
     below,
+};
+
+const TearingMode = enum {
+    no_tearing,
+    tearing,
+    window_hint,
 };
 
 pub const State = struct {
@@ -176,7 +183,7 @@ foreign_toplevel_handle: ForeignToplevelHandle = .{},
 
 /// Connector name of the output this view occupied before an evacuation.
 output_before_evac: ?[]const u8 = null,
-
+tearing_mode: TearingMode = .window_hint,
 id: [:0]const u8,
 
 pub fn create(impl: Impl) error{OutOfMemory}!*View {
@@ -578,6 +585,22 @@ pub fn getAppId(view: View) ?[*:0]const u8 {
     };
 }
 
+/// Return true if tearing should be allowed for the view.
+pub fn allowTearing(view: *View) bool {
+    switch (view.tearing_mode) {
+        .no_tearing => return false,
+        .tearing => return true,
+        .window_hint => {
+            if (server.config.allow_tearing) {
+                if (view.rootSurface()) |root_surface| {
+                    return server.tearing_control_manager.hintFromSurface(root_surface) == .@"async";
+                }
+            }
+            return false;
+        },
+    }
+}
+
 /// Clamp the width/height of the box to the constraints of the view
 pub fn applyConstraints(view: *View, box: *wlr.Box) void {
     box.width = math.clamp(box.width, view.constraints.min_width, view.constraints.max_width);
@@ -644,6 +667,10 @@ pub fn map(view: *View) !void {
     }
     if (server.config.rules.ssd.match(view)) |ssd| {
         view.pending.ssd = ssd;
+    }
+
+    if (server.config.rules.tearing.match(view)) |tearing| {
+        view.tearing_mode = if (tearing) .tearing else .no_tearing;
     }
 
     if (server.config.rules.dimensions.match(view)) |dimensions| {
